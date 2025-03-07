@@ -1,7 +1,8 @@
+import asyncio
 from typing import Optional
 
 import pytest
-from beanie import Document, Indexed, Link, WriteRules, init_beanie
+from beanie import Document, Indexed, Link, WriteRules, init_beanie, BulkWriter
 from pydantic import BaseModel
 
 from mongomock_motor import AsyncMongoMockClient
@@ -36,6 +37,37 @@ async def test_beanie():
 
     markbar = Product(name="Mark's", price=19.95, category=chocolate)
     await markbar.insert()
+
+    find_many = Product.find_many(Product.category == chocolate, Product.price < 10)
+    assert find_many.motor_cursor
+    assert await find_many.count() == 1
+
+    product = await Product.find_one(Product.price < 10)
+    await product.set({Product.name: 'Gold bar'})
+
+    product = await Product.find_one(Product.category.name == 'Chocolate')
+    assert product.name == 'Gold bar'
+    assert product.category.description == chocolate.description
+
+
+@pytest.mark.anyio
+async def test_beanie_bulk_write():
+    client = AsyncMongoMockClient(
+        'mongodb://user:pass@host:27017', connectTimeoutMS=250
+    )
+
+    await init_beanie(database=client.beanie_test, document_models=[Product])
+
+    chocolate = Category(
+        name='Chocolate', description='A preparation of roasted and ground cacao seeds.'
+    )
+
+    tonybar = Product(name="Tony's", price=5.95, category=chocolate)
+    markbar = Product(name="Mark's", price=19.95, category=chocolate)
+
+    async with BulkWriter() as bulk_writer:
+        await asyncio.gather(tonybar.save(bulk_writer=bulk_writer), markbar.save(bulk_writer=bulk_writer))
+        await bulk_writer.commit()
 
     find_many = Product.find_many(Product.category == chocolate, Product.price < 10)
     assert find_many.motor_cursor
